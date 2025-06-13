@@ -1,5 +1,6 @@
 # distance_measurement.py
 # Script to test Intel RealSense D455 for object detection and distance measurement using YOLO models.
+# Displays class name and distance with colored backgrounds, bounding box center point, and depth map.
 
 import cv2
 import numpy as np
@@ -10,12 +11,13 @@ import time
 # Configuration
 MODEL_PATH = "../models/yolo11n.pt"  # Change to "../models/yolov8n.pt" for YOLOv8
 CONF_THRESHOLD = 0.5  # Confidence threshold for YOLO detections
-WINDOW_NAME = "RealSense D455 - Distance Measurement"
+WINDOW_NAME_RGB = "RealSense D455 - RGB and Detection"
+WINDOW_NAME_DEPTH = "RealSense D455 - Depth Map"
 
 def initialize_realsense():
     """
     Initialize the Intel RealSense D455 camera pipeline for color and depth streams.
-    Returns the pipeline and configuration objects.
+    Returns the pipeline, configuration objects, and depth scale.
     """
     pipeline = rs.pipeline()
     config = rs.config()
@@ -70,9 +72,28 @@ def calculate_distance(depth_frame, bbox, depth_scale):
     
     return distance_cm
 
+def get_text_background(color_image, text, position, font_scale, font_thickness, bg_color):
+    """
+    Draw text with a colored background rectangle.
+    Args:
+        color_image: Image to draw on
+        text: Text to display
+        position: (x, y) coordinates for text
+        font_scale: Font scale for text
+        font_thickness: Thickness of text
+        bg_color: Background color (BGR)
+    """
+    (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+    x, y = position
+    bg_top_left = (x, y - text_height - 5)
+    bg_bottom_right = (x + text_width, y + 5)
+    cv2.rectangle(color_image, bg_top_left, bg_bottom_right, bg_color, -1)
+    cv2.putText(color_image, text, position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+
 def main():
     """
     Main function to run the RealSense D455 test for object detection and distance measurement.
+    Displays bounding box center, large text with class-colored backgrounds, and depth map.
     """
     # Initialize RealSense pipeline
     pipeline, align, depth_scale = initialize_realsense()
@@ -100,6 +121,9 @@ def main():
             depth_image = np.asanyarray(depth_frame.get_data())
             color_image = np.asanyarray(color_frame.get_data())
             
+            # Create colorized depth map
+            depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
+            
             # Run YOLO inference
             results = model(color_image, conf=CONF_THRESHOLD)
             
@@ -107,7 +131,7 @@ def main():
             for result in results:
                 for box in result.boxes:
                     # Get bounding box coordinates
-                    x_min, y_min, x_max, y_max = box.xyxy[0].cpu().numpy()
+                    x_min, y_min, x_max, y_max = map(int, box.xyxy[0].cpu().numpy())
                     conf = box.conf[0].cpu().numpy()
                     cls = int(box.cls[0].cpu().numpy())
                     label = model.names[cls]
@@ -115,24 +139,32 @@ def main():
                     # Calculate distance
                     distance_cm = calculate_distance(depth_image, [x_min, y_min, x_max, y_max], depth_scale)
                     
-                    # Draw bounding box and label
-                    cv2.rectangle(color_image, (int(x_min), int(y_min)), (int(x_max), int(y_max)), (0, 255, 0), 2)
-                    text = f"{label}: {conf:.2f}"
-                    if distance_cm is not None:
-                        text += f", {distance_cm:.1f} cm"
+                    # Draw bounding box (green)
+                    bbox_color = (0, 255, 0)
+                    cv2.rectangle(color_image, (x_min, y_min), (x_max, y_max), bbox_color, 2)
                     
-                    cv2.putText(color_image, text, (int(x_min), int(y_min) - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    # Draw center point of bounding box
+                    center_x, center_y = (x_min + x_max) // 2, (y_min + y_max) // 2
+                    cv2.circle(color_image, (center_x, center_y), 5, (0, 0, 255), -1)
+                    
+                    # Prepare text for class and distance
+                    class_text = f"{label} ({conf:.2f})"
+                    distance_text = f"Distance: {distance_cm:.1f} cm" if distance_cm is not None else "Distance: N/A"
+                    
+                    # Draw text with background
+                    text_y = y_min - 10 if y_min - 40 > 0 else y_min + 40
+                    get_text_background(color_image, class_text, (x_min, text_y), 0.8, 2, bbox_color)
+                    get_text_background(color_image, distance_text, (x_min, text_y + 25), 0.8, 2, bbox_color)
             
             # Calculate and display FPS
             curr_time = time.time()
             fps = 1 / (curr_time - prev_time)
             prev_time = curr_time
-            cv2.putText(color_image, f"FPS: {fps:.1f}", (10, 30),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            get_text_background(color_image, f"FPS: {fps:.1f}", (10, 30), 1.0, 2, (0, 0, 255))
             
-            # Display the frame
-            cv2.imshow(WINDOW_NAME, color_image)
+            # Display RGB and depth frames
+            cv2.imshow(WINDOW_NAME_RGB, color_image)
+            cv2.imshow(WINDOW_NAME_DEPTH, depth_colormap)
             
             # Exit on 'q' key
             if cv2.waitKey(1) & 0xFF == ord('q'):
