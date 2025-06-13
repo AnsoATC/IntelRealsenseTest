@@ -1,0 +1,19 @@
+# .gitignore
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore virtual environments
+venv/
+.env
+
+# Ignore large model files (if uploaded separately)
+#models/*.pt
+
+# Ignore IDE files
+.vscode/
+.idea/
+
+# Ignore miscellaneous
+*.log
+*.tmp
